@@ -1,0 +1,242 @@
+function [datNew, chanMap, xc, yc] = poolChan(buff, addNoise, noiseModel, newPatType)
+% pool channels on an UHD probe to build a new pattern
+% The patterns are hard coded here, pick which one with newPatType
+
+% incoming datr is chan x time
+[stChan, NT] = size(buff);
+if stChan ~= 385
+    fprintf( 'Incoming data does not have all channels, pooling will be incorrect.\n')
+end
+
+switch newPatType
+    
+    case 1
+        % pool and skip sets of 4 channels to make a checkerboard pattern
+        % on the LHS of the probe. There will be 48 channels in the 
+        % pooled data.
+        Nchan = 48;
+        Ncomb = 4;
+        datNew = zeros([Nchan,NT],'double');  % make double to match datr
+        xc = zeros([Nchan,1],'double');
+        yc = zeros([Nchan,1],'double');
+        chanMap = zeros([Nchan,1],'double');
+        chanMap(:,1) = (1:Nchan);
+        connected = ones([Nchan,1],'double');
+        for i = 0:2:Nchan-1       %step through rows in new pattern
+            row = floor(i/2); %starts at zero
+            bEven = ~(mod(row,2));
+            if bEven 
+                % rows 0, 2, 4 ...
+                c0 = row*16 + 1;   % add 1 for matlab 
+                xc(i+1) = 0;
+                xc(i+2) = 24;
+            else
+                % rows 1, 3, 5 ...
+                c0 = row*16 + 2 + 1;   % add 2 to offset from even rows, add 1 for matlab 
+                xc(i+1) = 12;
+                xc(i+2) = 36;
+            end
+            
+            yc(i+1) = row*12;
+            yc(i+2) = row*12;
+            datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
+            datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
+        end
+    case 2
+        % pool sets of 4 channels to make a NP 1.0-like pattern on the "RHS" of
+        % the probe. There will be 24 channels in the final pattern
+        % site 0 at x = 12 matches standard 1.0
+        Nchan = 24;
+        Ncomb = 4;
+        datNew = zeros([Nchan,NT],'double');  % make double to match datr
+        xc = zeros([Nchan,1],'double');
+        yc = zeros([Nchan,1],'double');
+        chanMap = zeros([Nchan,1],'double');
+        chanMap(:,1) = (1:Nchan);
+        connected = ones([Nchan,1],'double');
+        for i = 0:2:Nchan-1       %step through rows in new pattern
+            row = floor(i/2); %starts at zero
+            bEven = ~(mod(row,2));
+            if bEven 
+                % rows 0, 2, 4 ...
+                c0 = row*32 + 2 + 1;   % add 2 to offset to 3rd site in row, add 1 for matlab 
+                xc(i+1) = 12;
+                xc(i+2) = 36;
+            else
+                % rows 1, 3, 5 ...
+                c0 = row*32 + 1;   %  add 1 for matlab 
+                xc(i+1) = 0;
+                xc(i+2) = 24;
+            end
+            
+            yc(i+1) = row*24;
+            yc(i+2) = row*24;
+            datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
+            datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
+        end
+        
+    case 3
+        % pool sets of 4 channels to make a simulated two column probe with
+        % separation of 1, 2, 3, or 4 sites 
+        % (makes pitch of 18, 24, 30, or 36).
+        % the probe. There will be 24 channels in the final pattern
+        % site 0 at x = 12 matches standard 1.0
+        Nchan = 32;
+        Ncomb = 4;
+        datNew = zeros([Nchan,NT],'double');  % make double to match datr
+        xc = zeros([Nchan,1],'double');
+        yc = zeros([Nchan,1],'double');
+        chanMap = zeros([Nchan,1],'double');
+        chanMap(:,1) = (1:Nchan);
+        connected = ones([Nchan,1],'double');
+        % which columns
+        off1 = 0; % offset in sites to left hand column
+        off2 = 3; % offset in sites to right hand column
+        for i = 0:2:Nchan-1       %step through rows in new pattern
+            row = floor(i/2); %starts at zero
+            
+            c0 = row*24 + off1 + 1; % add off to get to site, plus 1 for matlab
+            c1 = row*24 + off2 + 1;
+            
+            xc(i+1) = off1*6;
+            xc(i+2) = off2*6;
+                 
+            yc(i+1) = row*18;
+            yc(i+2) = row*18;
+            datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
+            datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
+        end
+
+    case 4
+        % pool sets of 4 channels to make a simulated two column probe that tiles
+        % the same area as UHD. result has 24 rows x 4 columns
+        Nchan = 96;
+        Ncomb = 4;
+        datNew = zeros([Nchan,NT],'double');  % make double to match datr
+        xc = zeros([Nchan,1],'double');
+        yc = zeros([Nchan,1],'double');
+        chanMap = zeros([Nchan,1],'double');
+        chanMap(:,1) = (1:Nchan);
+        connected = ones([Nchan,1],'double');
+        for i = 0:4:Nchan-1       %step through rows in new pattern
+            row = floor(i/4); %starts at zero
+           
+            % indicies for the lower left hand site for each set of 4 to combine
+            c0 = row*16 + 1; % add offset = [0,1,2,3] to get to site, plus 1 for matlab
+            c1 = row*16 + 2;
+            c2 = row*16 + 3;
+            c3 = row*16 + 4;
+
+            xc(i+1:i+4) = 12*[0,1,2,3];
+            yc(i+1:i+4) = 12*row;
+
+            datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
+            datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
+            datNew(i+3,:) = (buff(c2,:) + buff(c2+1,:) + buff(c2+8,:) + buff(c2+9,:))/4;
+            datNew(i+4,:) = (buff(c3,:) + buff(c3+1,:) + buff(c3+8,:) + buff(c3+9,:))/4;
+        end
+
+
+
+end
+    % Generate noise with the same power spectrum as a pre-analyzed
+    % UHD dataset; spectrum stored in ops.noise_model
+    
+if addNoise
+    eNoise = makeNoise( NT, noiseModel, chanMap, connected, Nchan );
+    % fprintf( 'eNoise time: %.3f\n', toc );
+    % adding extra noise to make the total variance ~0.8*UHD noise one one
+    % site (to be roughly equivalent to a 1.0 probe, which has lower noise
+    % than a UHD probe).
+    % calculating how much noise we need to add:
+    % desired variance ~ (0.8 * sigmaUHD)^2 = (sigma combined data)^2 + (scale*sigmaUHD)^2
+    % (0.8^2) * sigmaUHD^2 = sigmaUHD^2/Ncomb + scale^2*sigmaUHD^2
+    % scale^2 = 0.8^2 - 1/Ncomb
+    % NOTE: because we're shooting for noise < sigmaUHD, this formula doesn't work if Ncomb = 1;
+    if Ncomb > 1
+        scale = sqrt( (0.8^2) - (1/Ncomb) );
+    else
+        scale = 0;
+    end
+    % eNoise is returned in uV, scale to bits for the probe type of
+    % interest (NP 1.0)
+    scale = scale/2.438;    % NP 1.0, gain = 500, 2.438 uV/bit
+    % fprintf( 'Channel 1 eNoise: %.3f mV\n', rms(eNoise(:,1)));
+    datNew = datNew + scale*eNoise';
+end
+    
+end
+
+function eNoise = makeNoise( noiseSamp,noiseModel,chanMap,connected,NchanTOT )
+
+    %if chanMap is a short version of a 3A probe, use the first
+    %nChan good channels to generate noise, then copy that array 
+    %into an NT X NChanTot array
+    
+    nChan = numel(chanMap);        %number of noise channels to generate
+    goodChan = sum(connected);
+    tempNoise = zeros( noiseSamp, goodChan, 'single' );
+    nT_fft = noiseModel.nm.nt;         %number of time points in the original time series
+    fftSamp = noiseModel.nm.fft;
+    
+    noiseBatch = ceil(noiseSamp/nT_fft);    
+    lastWind = noiseSamp - (noiseBatch-1)*nT_fft; %in samples
+    
+    for j = 1:goodChan     
+            for i = 1:noiseBatch-1
+                tStart = (i-1)*nT_fft+1;
+                tEnd = i * nT_fft;            
+                tempNoise(tStart:tEnd,j) = fftnoise(fftSamp(:,j),1);
+            end
+            %for last batch, call one more time and truncate
+            lastBatch = fftnoise(fftSamp(:,j),1);
+            tStart = (noiseBatch-1)*nT_fft+1;
+            tEnd = noiseSamp;
+            tempNoise(tStart:tEnd,j) = lastBatch(1:lastWind);             
+    end
+    
+    %unwhiten this array
+    Wrot = noiseModel.nm.Wrot(1:goodChan,1:goodChan);
+    tempNoise_unwh = tempNoise/Wrot;
+    
+    %scale to uV; will get scaled back to bits at the end
+    tempNoise_unwh = tempNoise_unwh/noiseModel.nm.bitPerUV;
+    
+    %to get the final noise array, map to an array including all channels
+    eNoise = zeros(noiseSamp, NchanTOT, 'single');
+    %indicies of the good channels
+    goodChanIndex = find(connected);
+    eNoise(:,chanMap(goodChanIndex)) = tempNoise_unwh;
+    
+end
+
+function noise=fftnoise(f,Nseries)
+% Generate noise with a given power spectrum.
+% Useful helper function for Monte Carlo null-hypothesis tests and confidence interval estimation.
+%  
+% noise=fftnoise(f[,Nseries])
+%
+% INPUTS:
+% f: the fft of a time series (must be a column vector)
+% Nseries: number of noise series to generate. (default=1)
+% 
+% OUTPUT:
+% noise: surrogate series with same power spectrum as f. (each column is a surrogate).
+%
+%   --- Aslak Grinsted (2009)
+%  
+if nargin<2
+    Nseries=1;
+end
+f=f(:);     %ensures f is a column vector
+N=length(f); 
+Np=floor((N-1)/2);
+phases=rand(Np,Nseries)*2*pi;
+phases=complex(cos(phases),sin(phases)); % this was the fastest alternative in my tests. 
+f=repmat(f,1,Nseries);
+f(2:Np+1,:)=f(2:Np+1,:).*phases;
+f(end:-1:end-Np+1,:)=conj(f(2:Np+1,:));
+noise=real(ifft(f,[],1)); 
+
+end
+
