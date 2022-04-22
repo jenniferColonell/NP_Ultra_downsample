@@ -1,58 +1,76 @@
 function make_noise_model
-%% Input params about your paths and data
-%start by building a rez structure -- will be used to call the whitening
-%and filtering functions drawn from Kilosort2 (https://github.com/MouseLand/Kilosort)
+% Calculate the power spectrum and spatial correlation for all channels in 
+% a "typical" dataset to use as a noise model. These noise models are used
+% in two contexts:
 
-%add path to NPY writing functions
+% (1) In 'pure' simulations starting with model units, create noise with
+% realistic frequency and spatial frequencies by creating a model from 
+% in vivo recordings from a similar brain region. The spatial correlations
+% of the background will be encoded in the whitening matrix (Wrot) and the
+% frequency spectrum is encoded in the fft.
+%
+% (2) For simulating low density probes by averaging channels measured on
+% high density probes (e.g. Neuropixels Ultra), create realistic single 
+% channel noise levels by creating a model from an in vitro noise test
+% recording -- the goal in this case is to capture the frequency spectrum
+% of all of the non-biological noise in the recording.
 
-addpath('C:\Users\labadmin\Documents\jic\npy-matlab-master\')
+% Data is filtered and whitened before fft, to make sure all data is 
+% within the frequency range. This script uses the KS2 preprocessing code
+% for filtering and whitening, copied to this file for convenience.
+% Kilosort 2 repo: (https://github.com/MouseLand/Kilosort)
+
+% start by building a rez structure -- will be used to call the whitening
+% and filtering functions drawn from Kilosort2 
 
 % params normally read in from a config file. These need to match the model
 % data set from which the noise will be extracted.
 
-% sample rate
-ops.fs = 30000;  
-ops.bitPerUV = 0.4267;   %(1/uVPerBit, 1/2.3437 for NP 1.0)
-
-% chanMap for your input data set. Make sure it includes reference channels
-% where they occur in the data
-ops.chanMap = 'D:\SC026_080819_g0_Imec2\SC026_noise_model\neuropixPhase3B1_kilosortChanMap.mat';
-[~,chanMapName,~] = fileparts(ops.chanMap);
+%% USER PARAMS
 
 %path to your data file; results will also be written to this folder
 rootZ = 'C:\UHD_example\noise_ext_ref_01_g0\noise_ext_ref_01_g0_imec0\';
 %name of the binary file
 dataName = 'noise_ext_ref_01_g0_t0.imec0.ap.bin';
+% name of kilsort style chanMap file, located in the rootZ directory
+mapName = 'uhd_chanMap_noref.mat';
 
-%directory for temporary whitened data file
-rootH = 'D:\kilosort_datatemp\';
-ops.trange = [0 inf]; % time range to use when extracting the whitening matrix
-ops.NchanTOT    = 385; % total number of channels in your recording, including digital
-%Time to sample in sec, need to sample at least enough to freq down to the high pass limit
-clipDur = 0.25; 
-%%
+
+% sample rate
+rez.ops.fs = 30000;  
+rez.ops.bitPerUV = 0.4267; %(1/uVPerBit, 1/2.3437 for NP 1.0)
+rez.ops.trange = [0 60]; % time range to use when extracting the whitening matrix
+rez.ops.NchanTOT    = 385; % total number of channels in your recording, including digital
+
+cm = load(fullfile(rootZ, mapName));
+rez.ops.chanMap = cm.chanMap; % 1-based indicies of channels in file. If channels need to be excluded, they should be omitted from chanMap
+rez.xc = cm.xcoords;
+rez.yc = cm.ycoords;
+rez.ops.whiteningRange      = 32; % number of channels to use for whitening each channel
 
 % frequency for high pass filtering (150)
-ops.fshigh = 150;  
+rez.ops.fshigh = 150;  
+%Time to sample in sec, need to sample at least enough to capture freq down to the high pass limit
+clipDur = 0.25; 
+%directory for temporary whitened data file
+rootH = 'D:\kilosort_datatemp\';
+%%
+
 
 %processing params usually read in from config. These should not be changed
-ops.GPU                 = 1; % has to be 1, no CPU version yet, sorry
-ops.useRAM              = 0;
-ops.ntbuff              = 64;    % samples of symmetrical buffer for whitening and spike detection
-ops.NT                  = 64*1024+ ops.ntbuff; % must be multiple of 32 + ntbuff. This is the batch size (try decreasing if out of memory). 
-ops.whiteningRange      = 32; % number of channels to use for whitening each channel
-ops.nSkipCov            = 25; % compute whitening matrix from every N-th batch
-ops.scaleproc           = 100;   % int16 scaling of whitened data
+rez.ops.GPU                 = 1; % has to be 1, no CPU version yet, sorry
+rez.ops.ntbuff              = 64;    % samples of symmetrical buffer for whitening and spike detection
+rez.ops.NT                  = 64*1024+ rez.ops.ntbuff; % must be multiple of 32 + ntbuff. This is the batch size (try decreasing if out of memory). 
+rez.ops.nSkipCov            = 25; % compute whitening matrix from every N-th batch
+rez.ops.scaleproc           = 100;   % int16 scaling of whitened data
+rez.ops.CAR                 = 1; % do CAR
 
+rez.ops.fproc       = fullfile(rootH, 'temp_wh.imec.ap.bin'); % proc file on a fast SSD
 
-ops.fproc       = fullfile(rootH, 'temp_wh.imec.ap.bin'); % proc file on a fast SSD
-
-ops.fbinary = fullfile(rootZ, dataName);
-ops.minfr_goodchannels = 0; %don't remove any channels due to low firing rate
+rez.ops.fbinary = fullfile(rootZ, dataName);
 
 % call preprocessDataSub to filter data and create the whitening matrix.
-ops.trange = [0 60]; % time range to use when extracting the whitening matrix
-[rez, ops] = preprocessDataForNoise(ops);
+[rez] = preprocessDataForNoise(rez);
 
 %calculate fft for each channel in the whitened data (stored in ops.fproc)
 tic;
@@ -83,7 +101,7 @@ fprintf( 'time to calc fft: %f\n', toc );
             eNoise(tStart:tEnd,j) = tempNoise(1:lastWind);             
     end
     
-    selectChan = [10,11,12,13,14];  
+    selectChan = [10,11,12,13,14];  %channels to plot, no effect on model output
         
     tR = [4200:5200]; %just looking at 1000 samples
     h = figure(1);  
@@ -92,7 +110,7 @@ fprintf( 'time to calc fft: %f\n', toc );
         plot( tR, currNoise + k*500 );
         hold on;
     end  
-    title("1000 samples of generated noise, before unwhitening");
+    title("1000 samples of generated noise, before unwhitening (scaled by fscale)");
     hold off
 
     
@@ -114,8 +132,7 @@ fprintf( 'time to calc fft: %f\n', toc );
     end   
     title('1000 samples of generated noise, after unwhitening');
     hold off
-
-    nm.chanMapName = chanMapName;
+   
     nm.fft = fftSamp;
     nm.nt = nT_fft;
     nm.Wrot = rez.Wrot;
@@ -136,53 +153,40 @@ end
 
 
 
-function [rez, ops] = preprocessDataForNoise(ops)
+function [rez] = preprocessDataForNoise(rez)
 
 %build rez structure -- code taken from preprocessDataSub in Kilsort 2
 %Only changes are to skip checking for low spike rate samples and
 %write out the data as rows = time -- just a convenience so it 
 %it can be read in using the same code
 
-ops.nt0 	= getOr(ops, {'nt0'}, 61);
-ops.nt0min  = getOr(ops, 'nt0min', ceil(20 * ops.nt0/61));
+rez.ops.nt0 	= 61;
+rez.ops.nt0min  = 20;
 
-NT       = ops.NT ;
-NchanTOT = ops.NchanTOT;
+NT       = rez.ops.NT ;
+NchanTOT = rez.ops.NchanTOT;
 
-bytes = get_file_size(ops.fbinary);
+bytes = get_file_size(rez.ops.fbinary);
 nTimepoints = floor(bytes/NchanTOT/2);
-ops.tstart = ceil(ops.trange(1) * ops.fs);
-ops.tend   = min(nTimepoints, ceil(ops.trange(2) * ops.fs));
-ops.sampsToRead = ops.tend-ops.tstart;
-ops.twind = ops.tstart * NchanTOT*2;
+rez.ops.tstart = ceil(rez.ops.trange(1) * rez.ops.fs);
+rez.ops.tend   = min(nTimepoints, ceil(rez.ops.trange(2) * rez.ops.fs));
+rez.ops.sampsToRead = rez.ops.tend-rez.ops.tstart;
+rez.ops.twind = rez.ops.tstart * NchanTOT*2;
 
-Nbatch      = ceil(ops.sampsToRead /(NT-ops.ntbuff));
-ops.Nbatch = Nbatch;
-
-[chanMap, xc, yc, kcoords, NchanTOTdefault] = loadChanMap(ops.chanMap);
-ops.NchanTOT = getOr(ops, 'NchanTOT', NchanTOTdefault);
-ops.igood = true(size(chanMap));
-
-ops.Nchan = numel(chanMap);
-ops.Nfilt = getOr(ops, 'nfilt_factor', 4) * ops.Nchan;
-
-rez.ops         = ops;
-rez.xc = xc;
-rez.yc = yc;
-
-rez.xcoords = xc;
-rez.ycoords = yc;
-
-rez.ops.chanMap = chanMap;
-rez.ops.kcoords = kcoords; 
+Nbatch      = ceil(rez.ops.sampsToRead /(NT-rez.ops.ntbuff));
+rez.ops.Nbatch = Nbatch;
 
 
-NTbuff      = NT + 4*ops.ntbuff;
+rez.ops.igood = true(size(rez.ops.chanMap));
+
+rez.ops.Nchan = numel(rez.ops.chanMap);
+
+
+NTbuff      = NT + 4*rez.ops.ntbuff;
 
 % by how many bytes to offset all the batches
-rez.ops.Nbatch = Nbatch;
 rez.ops.NTbuff = NTbuff;
-rez.ops.chanMap = chanMap;
+
 
 %build whitening matrix. This function filters before calculating the
 %cross correlation
@@ -195,35 +199,25 @@ Wrot = get_whitening_matrix(rez);
 
 %Apply the whitening matrix to a subset of the original data
 
-ops.tstart = ceil(ops.trange(1) * ops.fs);
-ops.tend   = min(nTimepoints, ceil(ops.trange(2) * ops.fs));
-ops.sampsToRead = ops.tend-ops.tstart;
-ops.twind = ops.tstart * NchanTOT*2;
-Nbatch      = ceil(ops.sampsToRead /(NT-ops.ntbuff));
-ops.Nbatch = Nbatch;
+rez.ops.tstart = ceil(rez.ops.trange(1) * rez.ops.fs);
+rez.ops.tend   = min(nTimepoints, ceil(rez.ops.trange(2) * rez.ops.fs));
+rez.ops.sampsToRead = rez.ops.tend-rez.ops.tstart;
+rez.ops.twind = rez.ops.tstart * NchanTOT*2;
+Nbatch      = ceil(rez.ops.sampsToRead /(NT-rez.ops.ntbuff));
+rez.ops.Nbatch = Nbatch;
 
 fprintf('Time %3.0fs. Loading raw data and applying filters... \n', toc);
 
-fid         = fopen(ops.fbinary, 'r');
-if ~ops.useRAM
-    fidW        = fopen(ops.fproc,   'w');
-    DATA = [];
-else
-    DATA = zeros(NT, rez.ops.Nchan, Nbatch, 'int16');    
-end
-% load data into batches, filter, compute covariance
-if isfield(ops,'fslow')&&ops.fslow<ops.fs/2
-    [b1, a1] = butter(3, [ops.fshigh/ops.fs,ops.fslow/ops.fs]*2, 'bandpass');
-elseif isfield(ops,'fshigh')
-    [b1, a1] = butter(3, ops.fshigh/ops.fs*2, 'high');
-end
+fid         = fopen(rez.ops.fbinary, 'r');
+
+fidW        = fopen(rez.ops.fproc,   'w');
 
 for ibatch = 1:Nbatch
-    offset = max(0, ops.twind + 2*NchanTOT*((NT - ops.ntbuff) * (ibatch-1) - 2*ops.ntbuff));
+    offset = max(0, rez.ops.twind + 2*NchanTOT*((NT - rez.ops.ntbuff) * (ibatch-1) - 2*rez.ops.ntbuff));
     if offset==0
         ioffset = 0;
     else
-        ioffset = ops.ntbuff;
+        ioffset = rez.ops.ntbuff;
     end
     fseek(fid, offset, 'bof');
     
@@ -235,47 +229,20 @@ for ibatch = 1:Nbatch
     if nsampcurr<NTbuff
         buff(:, nsampcurr+1:NTbuff) = repmat(buff(:,nsampcurr), 1, NTbuff-nsampcurr);
     end
-    
-    if ops.GPU
-        dataRAW = gpuArray(buff);
-    else
-        dataRAW = buff;
-    end
-    dataRAW = dataRAW';
-    dataRAW = single(dataRAW);
-    dataRAW = dataRAW(:, chanMap);
-    
-    % subtract the mean from each channel
-    dataRAW = dataRAW - mean(dataRAW, 1);    
-    
-    if (isfield(ops,'fshigh'))
-        datr = filter(b1, a1, dataRAW);
-        datr = flipud(datr);
-        datr = filter(b1, a1, datr);
-        datr = flipud(datr);
-    else
-        datr = dataRAW;
-    end
-    
-    % CAR, common average referencing by median
-    if getOr(ops, 'CAR', 1)
-        datr = datr - median(datr, 2);
-    end
-    
-    datr = datr(ioffset + (1:NT),:);
-    
-    %apply whitening
-    datr    = datr * Wrot;
-    
-    if ops.useRAM
-        DATA(:,:,ibatch) = gather_try(datr);
-    else
-        datcpu  = gather_try(int16(datr));
-        %next step will be reading in this file to get FTs
-        %Most convenient for that process to have the data in the original
-        %format (row = time, column = channel index)
-        fwrite(fidW, datcpu', 'int16');
-    end
+
+    datr    = gpufilter(buff, rez.ops, rez.ops.chanMap); % apply filters and median subtraction
+
+    datr    = datr(ioffset + (1:NT),:); % remove timepoints used as buffers
+
+    datr    = datr * Wrot; % whiten the data and scale by 200 for int16 range
+
+    datcpu  = gather(int16(datr)); % convert to int16, and gather on the CPU side
+  
+    %next step will be reading in this file to get FTs
+    %Most convenient for that process to have the data in the original
+    %format (row = time, column = channel index), so write the transpose
+    % (differs from the standard preprocessing code)
+    fwrite(fidW, datcpu', 'int16');
 end
 
 Wrot        = gather_try(Wrot);
@@ -305,12 +272,12 @@ Nchan = rez.ops.Nchan;
 xc = rez.xc;
 yc = rez.yc;
 
-% load data into patches, filter, compute covariance
-if isfield(ops,'fslow')&&ops.fslow<ops.fs/2
-    [b1, a1] = butter(3, [ops.fshigh/ops.fs,ops.fslow/ops.fs]*2, 'bandpass');
-else
-    [b1, a1] = butter(3, ops.fshigh/ops.fs*2, 'high');
-end
+% % load data into patches, filter, compute covariance
+% if isfield(ops,'fslow')&&ops.fslow<ops.fs/2
+%     [b1, a1] = butter(3, [ops.fshigh/ops.fs,ops.fslow/ops.fs]*2, 'bandpass');
+% else
+%     [b1, a1] = butter(3, ops.fshigh/ops.fs*2, 'high');
+% end
 
 fprintf('Getting channel whitening matrix... \n');
 fid = fopen(ops.fbinary, 'r');
@@ -412,5 +379,91 @@ noise=real(ifft(f,[],1));
 end
 
 
+function bytes = get_file_size(fname)
+% gets file size in bytes, ensuring that symlinks are dereferenced
+% MP: not sure who wrote this code, but they were careful to do it right on Linux
+    bytes = NaN;
+    if isunix
+        cmd = sprintf('stat -Lc %%s %s', fname);
+        [status, r] = system(cmd);
+        if status == 0
+            bytes = str2double(r);
+        end
+    end
+
+    if isnan(bytes)
+        o = dir(fname);
+        bytes = o.bytes;
+    end
+end
+
+function datr = gpufilter(buff, ops, chanMap)
+% filter this batch of data after common average referencing with the
+% median
+% buff is timepoints by channels
+% chanMap are indices of the channels to be kep
+% ops.fs and ops.fshigh are sampling and high-pass frequencies respectively
+% if ops.fslow is present, it is used as low-pass frequency (discouraged)
+
+% set up the parameters of the filter
+if isfield(ops,'fslow')&&ops.fslow<ops.fs/2
+    [b1, a1] = butter(3, [ops.fshigh/ops.fs,ops.fslow/ops.fs]*2, 'bandpass'); % butterworth filter with only 3 nodes (otherwise it's unstable for float32)
+else
+    [b1, a1] = butter(3, ops.fshigh/ops.fs*2, 'high'); % the default is to only do high-pass filtering at 150Hz
+end
+
+dataRAW = gpuArray(buff); % move int16 data to GPU
+dataRAW = dataRAW';
+dataRAW = single(dataRAW); % convert to float32 so GPU operations are fast
+dataRAW = dataRAW(:, chanMap); % subsample only good channels
+
+% subtract the mean from each channel
+dataRAW = dataRAW - mean(dataRAW, 1); % subtract mean of each channel
+
+% CAR, common average referencing by median
+if ops.CAR
+    dataRAW = dataRAW - median(dataRAW, 2); % subtract median across channels
+end
+
+%next four lines should be equivalent to filtfilt (which cannot be used because it requires float64)
+datr = filter(b1, a1, dataRAW); % causal forward filter
+datr = flipud(datr); % reverse time
+datr = filter(b1, a1, datr); % causal forward filter again
+datr = flipud(datr); % reverse time back
+
+end
+
+function Wrot = whiteningLocal(CC, yc, xc, nRange)
+% function to perform local whitening of channels
+% CC is a matrix of Nchan by Nchan correlations
+% yc and xc are vector of Y and X positions of each channel
+% nRange is the number of nearest channels to consider
+    Wrot = zeros(size(CC,1), size(CC,1));
+    for j = 1:size(CC,1)
+        ds          = (xc - xc(j)).^2 + (yc - yc(j)).^2;
+        [~, ilocal] = sort(ds, 'ascend');
+        ilocal      = ilocal(1:nRange); % take the closest channels to the primary channel. First channel in this list will always be the primary channel.
+    
+        wrot0 = whiteningFromCovariance(CC(ilocal, ilocal));
+        Wrot(ilocal, j)  = wrot0(:,1); % the first column of wrot0 is the whitening filter for the primary channel
+    end
+end
 
 
+function Wrot = whiteningFromCovariance(CC)
+% takes as input the matrix CC of channel pairwise correlations
+% outputs a symmetric rotation matrix (also Nchan by Nchan) that rotates
+% the data onto uncorrelated, unit-norm axes
+    [E, D] 	= svd(CC); % covariance eigendecomposition (same as svd for positive-definite matrix)
+    D       = diag(D); % take the non-zero values from the diagonal
+    eps 	= 1e-6;
+    Wrot 	= E * diag(1./(D + eps).^.5) * E'; % this is the symmetric whitening matrix (ZCA transform)
+end
+
+
+function x = gather_try(x)
+    try
+        x = gather(x);
+    catch
+    end
+end
