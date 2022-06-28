@@ -29,18 +29,18 @@ function make_noise_model
 %% USER PARAMS
 
 %path to your data file; results will also be written to this folder
-rootZ = 'C:\UHD_example\noise_ext_ref_01_g0\noise_ext_ref_01_g0_imec0\';
+rootZ = 'E:\MEArec_for_localization\UHD512';
 %name of the binary file
-dataName = 'noise_ext_ref_01_g0_t0.imec0.ap.bin';
+dataName = 'UHD512_120U_10uV_g0_t0.imec0.ap.bin';
 % name of kilsort style chanMap file, located in the rootZ directory
-mapName = 'uhd_chanMap_noref.mat';
+mapName = 'UHD512_120U_10uV_kilosortChanMap.mat';
 
 
 % sample rate
 rez.ops.fs = 30000;  
 rez.ops.bitPerUV = 0.4267; %(1/uVPerBit, 1/2.3437 for NP 1.0)
-rez.ops.trange = [0 60]; % time range to use when extracting the whitening matrix
-rez.ops.NchanTOT    = 385; % total number of channels in your recording, including digital
+rez.ops.trange = [0 8]; % time range to use when extracting the whitening matrix
+rez.ops.NchanTOT    = 512; % total number of channels in your recording, including digital
 
 cm = load(fullfile(rootZ, mapName));
 rez.ops.chanMap = cm.chanMap; % 1-based indicies of channels in file. If channels need to be excluded, they should be omitted from chanMap

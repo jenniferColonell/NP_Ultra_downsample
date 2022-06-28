@@ -1,12 +1,17 @@
-function [datNew, chanMap, xc, yc] = poolChan(buff, addNoise, noiseModel, newPatType)
+function [datNew, chanMap, xc, yc, saveChanStr, newShankMap] = poolChan(buff, addNoise, noiseModel, newPatType)
 % pool channels on an UHD probe to build a new pattern
 % The patterns are hard coded here, pick which one with newPatType
 
 % incoming datr is chan x time
 [stChan, NT] = size(buff);
-if stChan ~= 385
-    fprintf( 'Incoming data does not have all channels, pooling will be incorrect.\n')
+if stChan == 385
+    nSite = 384;    % this is a real UHD recordign w/ SY channel
+else
+    nSite = stChan; % simulated data, no SY
 end
+
+% keep track of bottom left site 
+saveChanStr = 'snsSaveChanSubset=';
 
 switch newPatType
     
@@ -14,7 +19,7 @@ switch newPatType
         % pool and skip sets of 4 channels to make a checkerboard pattern
         % on the LHS of the probe. There will be 48 channels in the 
         % pooled data.
-        Nchan = 48;
+        Nchan = nSite/8;
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
         xc = zeros([Nchan,1],'double');
@@ -41,12 +46,15 @@ switch newPatType
             yc(i+2) = row*12;
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
+            saveChanStr = sprintf('%s%d,%d,%d,%d,',saveChanStr,c0-1,c0+3);
         end
+        nCol = 2;  % For spikeGLX shank map, staggered colums treated as two
+
     case 2
         % pool sets of 4 channels to make a NP 1.0-like pattern on the "RHS" of
         % the probe. There will be 24 channels in the final pattern
         % site 0 at x = 12 matches standard 1.0
-        Nchan = 24;
+        Nchan = nSite/16;
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
         xc = zeros([Nchan,1],'double');
@@ -73,15 +81,16 @@ switch newPatType
             yc(i+2) = row*24;
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
+            saveChanStr = sprintf('%s%d,%d,',saveChanStr,c0-1,c0+3);
         end
+        nCol = 2;  % For spikeGLX shank map, staggered colums treated as two
         
     case 3
         % pool sets of 4 channels to make a simulated two column probe with
         % separation of 1, 2, 3, or 4 sites 
         % (makes pitch of 18, 24, 30, or 36).
-        % the probe. There will be 24 channels in the final pattern
-        % site 0 at x = 12 matches standard 1.0
-        Nchan = 32;
+        % the probe. There will be 32 channels in the final pattern
+        Nchan = floor(nSite/12);
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
         xc = zeros([Nchan,1],'double');
@@ -91,7 +100,8 @@ switch newPatType
         connected = ones([Nchan,1],'double');
         % which columns
         off1 = 0; % offset in sites to left hand column
-        off2 = 3; % offset in sites to right hand column
+        off2 = 6; % offset in sites to right hand column
+        
         for i = 0:2:Nchan-1       %step through rows in new pattern
             row = floor(i/2); %starts at zero
             
@@ -105,12 +115,14 @@ switch newPatType
             yc(i+2) = row*18;
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
+            saveChanStr = sprintf('%s%d,%d,',saveChanStr,c0-1,c1-1);
         end
-
+        nCol = 2;  % These patterns really are two columns
+        
     case 4
         % pool sets of 4 channels to make a simulated two column probe that tiles
         % the same area as UHD. result has 24 rows x 4 columns
-        Nchan = 96;
+        Nchan = nSite/4;
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
         xc = zeros([Nchan,1],'double');
@@ -122,11 +134,11 @@ switch newPatType
             row = floor(i/4); %starts at zero
            
             % indicies for the lower left hand site for each set of 4 to combine
-            c0 = row*16 + 1; % add offset = [0,1,2,3] to get to site, plus 1 for matlab
-            c1 = row*16 + 2;
-            c2 = row*16 + 3;
-            c3 = row*16 + 4;
-
+            c0 = row*16 + 1; % add offset = [0,2,4,6] to get to site, plus 1 for matlab
+            c1 = row*16 + 3;
+            c2 = row*16 + 5;
+            c3 = row*16 + 7;
+            
             xc(i+1:i+4) = 12*[0,1,2,3];
             yc(i+1:i+4) = 12*row;
 
@@ -134,8 +146,9 @@ switch newPatType
             datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
             datNew(i+3,:) = (buff(c2,:) + buff(c2+1,:) + buff(c2+8,:) + buff(c2+9,:))/4;
             datNew(i+4,:) = (buff(c3,:) + buff(c3+1,:) + buff(c3+8,:) + buff(c3+9,:))/4;
+            saveChanStr = sprintf('%s%d,%d,%d,%d,',saveChanStr,c0-1,c1-1,c2-1,c3-1);
         end
-
+        nCol = 4;  % 8 sites in original, 2 in 4x4 combination
 
 
 end
@@ -164,6 +177,9 @@ if addNoise
     % fprintf( 'Channel 1 eNoise: %.3f mV\n', rms(eNoise(:,1)));
     datNew = datNew + scale*eNoise';
 end
+
+    % make new shank map string
+    newShankMap = makeShankMap(xc, yc, nCol);
     
 end
 
@@ -237,6 +253,40 @@ f=repmat(f,1,Nseries);
 f(2:Np+1,:)=f(2:Np+1,:).*phases;
 f(end:-1:end-Np+1,:)=conj(f(2:Np+1,:));
 noise=real(ifft(f,[],1)); 
+
+end
+
+function newMap = makeShankMap(xcoord, ycoord, nCol)
+% for a set of x and y coordinate and number of columns, build a SGLX shank
+% map string. Need to know the number of columns because staggered patterns
+% are treated as 2 columns in SGLX
+
+    yVal = unique(ycoord);
+    nRow = numel(yVal);
+    xVal = unique(xcoord);
+    nElec = numel(xcoord);
+
+    col = zeros([nElec,1]);
+    row = zeros([nElec,1]);
+    if nCol == 2
+        col = xcoord > median(xVal);    %automatically zero based
+        for i = 1:nElec 
+            row(i) = find(yVal == ycoord(i))-1; % -1 for zero based
+        end
+    else
+        for i = 1:nElec 
+            col(i) = find(xVal == xcoord(i))-1;
+            row(i) = find(yVal == ycoord(i))-1;
+        end
+    end
+
+    %header line (shank, number of columns, number of rows)
+    newMap = sprintf('(1,%d,%d)', nCol, nRow);
+    for i = 1:nElec
+        currEntry = sprintf('(0:%d:%d:1)', col(i), row(i)); 
+        newMap = [newMap,currEntry];
+    end
+    
 
 end
 
