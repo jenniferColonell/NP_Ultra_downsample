@@ -1,4 +1,4 @@
-function [datNew, chanMap, xc, yc, saveChanStr, newShankMap] = poolChan(buff, addNoise, noiseModel, newPatType)
+function [datNew, chanMap, xc, yc, saveChanStr, saveChanArr] = poolChan(buff, addNoise, noiseModel, noiseFrac, newPatType, stSite)
 % pool channels on an UHD probe to build a new pattern
 % The patterns are hard coded here, pick which one with newPatType
 
@@ -54,6 +54,7 @@ switch newPatType
         % pool sets of 4 channels to make a NP 1.0-like pattern on the "RHS" of
         % the probe. There will be 24 channels in the final pattern
         % site 0 at x = 12 matches standard 1.0
+        % stSite parameter not yet implemented for this pattern
         Nchan = nSite/16;
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
@@ -82,6 +83,7 @@ switch newPatType
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
             saveChanStr = sprintf('%s%d,%d,',saveChanStr,c0-1,c0+3);
+            saveChanArr(i+1:i+2) = [c0-1,c0+3];
         end
         nCol = 2;  % For spikeGLX shank map, staggered colums treated as two
         
@@ -90,6 +92,7 @@ switch newPatType
         % separation of 1, 2, 3, or 4 sites 
         % (makes pitch of 18, 24, 30, or 36).
         % the probe. There will be 32 channels in the final pattern
+        % starts from lower left hand site in stSite
         Nchan = floor(nSite/12);
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
@@ -98,15 +101,17 @@ switch newPatType
         chanMap = zeros([Nchan,1],'double');
         chanMap(:,1) = (1:Nchan);
         connected = ones([Nchan,1],'double');
+        saveChanArr = zeros([Nchan,1],'double');
         % which columns
-        off1 = 0; % offset in sites to left hand column
-        off2 = 6; % offset in sites to right hand column
+        off1 = mod(stSite,8); % offset in sites to left hand column
+        off2 = off1 + 5; % set to 5 for 30 um pitch, closest to 2.0
+        row_off = floor(stSite/8); 
         
         for i = 0:2:Nchan-1       %step through rows in new pattern
-            row = floor(i/2); %starts at zero
+            row = floor(i/2);      %starts at zero
             
-            c0 = row*24 + off1 + 1; % add off to get to site, plus 1 for matlab
-            c1 = row*24 + off2 + 1;
+            c0 = row_off*8 + row*24 + off1 + 1; % add off to get to site, plus 1 for matlab
+            c1 = row_off*8 + row*24 + off2 + 1;
             
             xc(i+1) = off1*6;
             xc(i+2) = off2*6;
@@ -116,6 +121,7 @@ switch newPatType
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
             saveChanStr = sprintf('%s%d,%d,',saveChanStr,c0-1,c1-1);
+            saveChanArr(i+1:i+2) = [c0-1,c1-1];            
         end
         nCol = 2;  % These patterns really are two columns
         
@@ -127,6 +133,7 @@ switch newPatType
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
         xc = zeros([Nchan,1],'double');
         yc = zeros([Nchan,1],'double');
+        saveChanArr = zeros([Nchan,1],'double');
         chanMap = zeros([Nchan,1],'double');
         chanMap(:,1) = (1:Nchan);
         connected = ones([Nchan,1],'double');
@@ -146,10 +153,13 @@ switch newPatType
             datNew(i+2,:) = (buff(c1,:) + buff(c1+1,:) + buff(c1+8,:) + buff(c1+9,:))/4;
             datNew(i+3,:) = (buff(c2,:) + buff(c2+1,:) + buff(c2+8,:) + buff(c2+9,:))/4;
             datNew(i+4,:) = (buff(c3,:) + buff(c3+1,:) + buff(c3+8,:) + buff(c3+9,:))/4;
+            saveChanArr(i+1:i+4) = [c0-1,c1-1,c2-1,c3-1];
             saveChanStr = sprintf('%s%d,%d,%d,%d,',saveChanStr,c0-1,c1-1,c2-1,c3-1);
         end
         nCol = 4;  % 8 sites in original, 2 in 4x4 combination
 
+    otherwise
+        fprintf('unrecoginzed pattern type: %d', newPatType)
 
 end
     % Generate noise with the same power spectrum as a pre-analyzed
@@ -162,12 +172,13 @@ if addNoise
     % site (to be roughly equivalent to a 1.0 probe, which has lower noise
     % than a UHD probe).
     % calculating how much noise we need to add:
-    % desired variance ~ (0.8 * sigmaUHD)^2 = (sigma combined data)^2 + (scale*sigmaUHD)^2
-    % (0.8^2) * sigmaUHD^2 = sigmaUHD^2/Ncomb + scale^2*sigmaUHD^2
-    % scale^2 = 0.8^2 - 1/Ncomb
-    % NOTE: because we're shooting for noise < sigmaUHD, this formula doesn't work if Ncomb = 1;
-    if Ncomb > 1
-        scale = sqrt( (0.8^2) - (1/Ncomb) );
+    % desired variance ~ (noiseFrac * sigmaUHD)^2 = (sigma combined data)^2 + (scale*sigmaUHD)^2
+    % (noiseFrac^2) * sigmaUHD^2 = sigmaUHD^2/Ncomb + scale^2*sigmaUHD^2
+    % scale^2 = noiseFrac^2 - 1/Ncomb
+    % If Ncomb = 1 and noiseFrac < 1, we don't want to add any noise, set
+    % scale = 0.
+    if ((noiseFrac^2) - (1/Ncomb)) > 0
+        scale = sqrt( (noiseFrac^2) - (1/Ncomb) );
     else
         scale = 0;
     end
@@ -179,7 +190,8 @@ if addNoise
 end
 
     % make new shank map string
-    newShankMap = makeShankMap(xc, yc, nCol);
+    % replaced with indexing into original shank map
+    % newShankMap = makeShankMap(xc, yc, nCol);
     
 end
 
