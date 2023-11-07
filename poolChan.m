@@ -54,7 +54,10 @@ switch newPatType
         % pool sets of 4 channels to make a NP 1.0-like pattern on the "RHS" of
         % the probe. There will be 24 channels in the final pattern
         % site 0 at x = 12 matches standard 1.0
-        % stSite parameter not yet implemented for this pattern
+        if ~ismember(stSite,[0,2,16,18])
+            fprintf('stSite must be 0,2,16 or 18 for the NP 1.0 pattern')
+            stSite = 0;
+        end
         Nchan = nSite/16;
         Ncomb = 4;
         datNew = zeros([Nchan,NT],'double');  % make double to match datr
@@ -63,23 +66,77 @@ switch newPatType
         chanMap = zeros([Nchan,1],'double');
         chanMap(:,1) = (1:Nchan);
         connected = ones([Nchan,1],'double');
+        
         for i = 0:2:Nchan-1       %step through rows in new pattern
-            row = floor(i/2); %starts at zero
-            bEven = ~(mod(row,2));
-            if bEven 
-                % rows 0, 2, 4 ...
-                c0 = row*32 + 2 + 1;   % add 2 to offset to 3rd site in row, add 1 for matlab 
-                xc(i+1) = 12;
-                xc(i+2) = 36;
-            else
-                % rows 1, 3, 5 ...
-                c0 = row*32 + 1;   %  add 1 for matlab 
-                xc(i+1) = 0;
-                xc(i+2) = 24;
+
+            switch stSite
+                case 2
+                    row = floor(i/2); %starts at zero
+                    bEven = ~(mod(row,2));
+                    if bEven 
+                        % rows 0, 2, 4 ...
+                        c0 = row*32 + 2 + 1;   % add 2 to offset to 3rd site in row, add 1 for matlab 
+                        xc(i+1) = 12;
+                        xc(i+2) = 36;
+                    else
+                        % rows 1, 3, 5 ...
+                        c0 = row*32 + 1;   %  add 1 for matlab 
+                        xc(i+1) = 0;
+                        xc(i+2) = 24;
+                    end
+                    yc(i+1) = row*24;
+                    yc(i+2) = row*24;
+                case 18
+                    row = floor(i/2); %starts at zero
+                    bEven = ~(mod(row,2));
+                    if bEven 
+                        % rows 0, 2, 4 ...
+                        c0 = row*32 + 18 + 1;   % add 16 + 2 to offset to 3rd site in 3rd uhd row, add 1 for matlab 
+                        xc(i+1) = 12;
+                        xc(i+2) = 36;
+                    else
+                        % rows 1, 3, 5 ...
+                        c0 = row*32 + 16 + 1;   % add 16 to offset to 3rd uhd row, add 1 for matlab 
+                        xc(i+1) = 0;
+                        xc(i+2) = 24;
+                    end
+                    yc(i+1) = row*24 + 12;
+                    yc(i+2) = row*24 + 12;
+                case 0
+                    row = floor(i/2); %starts at zero
+                    bEven = ~(mod(row,2));
+                    if bEven 
+                        % rows 0, 2, 4 ...
+                        c0 = row*32 + 1;   % add 1 for matlab 
+                        xc(i+1) = 0;
+                        xc(i+2) = 24;
+                    else
+                        % rows 1, 3, 5 ...
+                        c0 = row*32 + 2 + 1;   % add 2 to offset to 3rd site in row, add 1 for matlab 
+                        xc(i+1) = 12;
+                        xc(i+2) = 36;
+                    end
+                    yc(i+1) = row*24;
+                    yc(i+2) = row*24;
+                case 16
+                    row = floor(i/2); %starts at zero
+                    bEven = ~(mod(row,2));
+                    if bEven 
+                        % rows 0, 2, 4 ...
+                        c0 = row*32 + 16 + 1;   % add 16 to offset to 2nd row, add 1 for matlab 
+                        xc(i+1) = 0;
+                        xc(i+2) = 24;
+                    else
+                        % rows 1, 3, 5 ...
+                        c0 = row*32 + 16 + 2 + 1;   % add 16 to offset to 2nd row, plus 2 for 3rd site, add 1 for matlab 
+                        xc(i+1) = 12;
+                        xc(i+2) = 36;
+                    end
+                    yc(i+1) = row*24 + 12;
+                    yc(i+2) = row*24 + 12;
             end
-            
-            yc(i+1) = row*24;
-            yc(i+2) = row*24;
+
+
             datNew(i+1,:) = (buff(c0,:) + buff(c0+1,:) + buff(c0+8,:) + buff(c0+9,:))/4;
             datNew(i+2,:) = (buff(c0+4,:) + buff(c0+5,:) + buff(c0+12,:) + buff(c0+13,:))/4;
             saveChanStr = sprintf('%s%d,%d,',saveChanStr,c0-1,c0+3);
